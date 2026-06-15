@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: observability-platform
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus, health, info
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  endpoint:
+    prometheus:
+      enabled: true
+
+scheduling:
+  enabled: true
+
+dataset:
+  path: classpath:dataset/observability_dataset.csv
+  replay-interval-ms: 5000   # one CSV row every 5 seconds
+server:
+  port: 8081

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pulsecast Forecast Visualization</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f7fb;
+            margin: 0;
+            padding: 30px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            margin-top: 0;
+            color: #1f2937;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        select, button {
+            padding: 10px 14px;
+            font-size: 15px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            margin-right: 10px;
+        }
+
+        button {
+            cursor: pointer;
+            background: #2563eb;
+            color: white;
+            border: none;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        .summary {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .card {
+            background: #f8fafc;
+            padding: 14px 18px;
+            border-radius: 12px;
+            min-width: 180px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .card-title {
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        .card-value {
+            font-size: 22px;
+            font-weight: bold;
+            margin-top: 6px;
+            color: #0f172a;
+        }
+
+        canvas {
+            margin-top: 20px;
+        }
+
+        .note {
+            margin-top: 16px;
+            font-size: 14px;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Pulsecast Forecast Visualization</h1>
+
+    <div class="controls">
+        <label for="metricSelect">Metric:</label>
+
+        <select id="metricSelect">
+            <option value="traffic">Traffic</option>
+            <option value="latency">Latency</option>
+            <option value="errors">Errors</option>
+            <option value="saturation">Saturation</option>
+        </select>
+
+        <button onclick="loadChart()">Load Forecast</button>
+    </div>
+
+    <div class="summary">
+        <div class="card">
+            <div class="card-title">Metric</div>
+            <div class="card-value" id="metricName">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Actual Avg</div>
+            <div class="card-value" id="actualAvg">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Forecast Avg</div>
+            <div class="card-value" id="forecastAvg">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Points</div>
+            <div class="card-value" id="pointCount">-</div>
+        </div>
+    </div>
+
+    <canvas id="forecastChart"></canvas>
+
+    <div class="note">
+        Blue line = actual values, orange line = forecast values, grey dashed lines = confidence range.
+    </div>
+</div>
+
+<script>
+    let chartInstance = null;
+
+    async function loadChart() {
+        const metric = document.getElementById("metricSelect").value;
+
+        const response = await fetch(`/forecast/chart/${metric}`);
+
+        if (!response.ok) {
+            alert("Failed to load chart data. Check backend endpoint.");
+            return;
+        }
+
+        const data = await response.json();
+
+        const actual = data.actualValues;
+        const forecast = data.forecastValues;
+        const lower = data.lowerBounds;
+        const upper = data.upperBounds;
+
+        const labels = actual.map((_, index) => index + 1);
+
+        document.getElementById("metricName").innerText = data.metric;
+        document.getElementById("actualAvg").innerText = average(actual).toFixed(2);
+        document.getElementById("forecastAvg").innerText = average(forecast).toFixed(2);
+        document.getElementById("pointCount").innerText = actual.length;
+
+        const ctx = document.getElementById("forecastChart").getContext("2d");
+
+        if (chartInstance !== null) {
+            chartInstance.destroy();
+        }
+
+        chartInstance = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "Actual",
+                        data: actual,
+                        borderColor: "#2563eb",
+                        backgroundColor: "rgba(37, 99, 235, 0.08)",
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.25
+                    },
+                    {
+                        label: "Forecast",
+                        data: forecast,
+                        borderColor: "#f97316",
+                        backgroundColor: "rgba(249, 115, 22, 0.08)",
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.25
+                    },
+                    {
+                        label: "Lower Bound",
+                        data: lower,
+                        borderColor: "#94a3b8",
+                        borderWidth: 1,
+                        borderDash: [6, 6],
+                        pointRadius: 0,
+                        tension: 0.25
+                    },
+                    {
+                        label: "Upper Bound",
+                        data: upper,
+                        borderColor: "#94a3b8",
+                        borderWidth: 1,
+                        borderDash: [6, 6],
+                        pointRadius: 0,
+                        tension: 0.25
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    mode: "index",
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        position: "top"
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: function(context) {
+                                return "Interval " + context[0].label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: "5-minute interval"
+                        },
+                        ticks: {
+                            maxTicksLimit: 20
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: data.metric
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function average(values) {
+        if (!values || values.length === 0) {
+            return 0;
+        }
+
+        let sum = 0;
+
+        for (const value of values) {
+            sum += value;
+        }
+
+        return sum / values.length;
+    }
+
+    window.onload = loadChart;
+</script>
+
+</body>
+</html>

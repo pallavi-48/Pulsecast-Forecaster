@@ -1,81 +1,63 @@
 package com.pulsecast.observability.forecasting.controller;
 
-import com.pulsecast.observability.forecasting.analysis.SarimaParameterSelector;
-import com.pulsecast.observability.forecasting.domain.TimeSeries;
-import com.pulsecast.observability.forecasting.forecasting.SarimaNextDayForecaster;
-import com.pulsecast.observability.forecasting.loader.ForecastDatasetLoader;
-import com.pulsecast.observability.forecasting.model.*;
-import com.pulsecast.observability.forecasting.training.SarimaModelTrainer;
+import com.pulsecast.observability.forecasting.model.DatasetFile;
+import com.pulsecast.observability.forecasting.model.ForecastChartResponse;
+import com.pulsecast.observability.forecasting.model.MetricType;
+import com.pulsecast.observability.forecasting.service.MetricForecastService;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/forecast/chart")
 public class ForecastChartController {
 
+    private final MetricForecastService metricForecastService;
+
+    public ForecastChartController(
+            MetricForecastService metricForecastService
+    ) {
+        this.metricForecastService =
+                metricForecastService;
+    }
+
     @GetMapping("/{metric}")
-    public ForecastChartResponse chart(
+    public ForecastChartResponse oldChart(
             @PathVariable String metric
     ) {
-
-        ForecastDatasetLoader loader =
-                new ForecastDatasetLoader();
-
-        TimeSeries historicalSeries =
-                loader.loadTwoMonthDataset();
-
-        TimeSeries currentSeries =
-                loader.loadCurrent();
 
         MetricType metricType =
                 MetricType.valueOf(
                         metric.toUpperCase()
                 );
 
-        MetricSeriesExtractor extractor =
-                new MetricSeriesExtractor();
+        return metricForecastService.forecastChart(
+                DatasetFile.OBSERVABILITY_TRAINING,
+                DatasetFile.OBSERVABILITY_CURRENT,
+                metricType
+        );
+    }
 
-        double[] historicalValues =
-                extractor.extract(
-                        historicalSeries,
-                        metricType
+    @GetMapping
+    public ForecastChartResponse chart(
+            @RequestParam String training,
+            @RequestParam String test,
+            @RequestParam String metric
+    ) {
+
+        DatasetFile trainingFile =
+                DatasetFile.fromName(training);
+
+        DatasetFile testFile =
+                DatasetFile.fromName(test);
+
+        MetricType metricType =
+                MetricType.valueOf(
+                        metric.toUpperCase()
                 );
 
-        double[] actualValues =
-                extractor.extract(
-                        currentSeries,
-                        metricType
-                );
-
-        SarimaParameterSelector selector =
-                new SarimaParameterSelector();
-
-        SarimaParameters parameters =
-                selector.selectParameters();
-
-        SarimaModelTrainer trainer =
-                new SarimaModelTrainer();
-
-        SarimaModel model =
-                trainer.train(
-                        historicalValues,
-                        parameters
-                );
-
-        SarimaNextDayForecaster forecaster =
-                new SarimaNextDayForecaster();
-
-        ForecastResult forecastResult =
-                forecaster.forecastNextDay(
-                        model,
-                        historicalValues
-                );
-
-        return new ForecastChartResponse(
-                metricType.name(),
-                actualValues,
-                forecastResult.getForecastValues(),
-                forecastResult.getLowerBounds(),
-                forecastResult.getUpperBounds()
+        return metricForecastService.forecastChart(
+                trainingFile,
+                testFile,
+                metricType
         );
     }
 }

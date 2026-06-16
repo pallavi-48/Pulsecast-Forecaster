@@ -15,7 +15,7 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1300px;
             margin: auto;
             background: white;
             padding: 25px;
@@ -30,6 +30,10 @@
 
         .controls {
             margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
         }
 
         select, button {
@@ -37,7 +41,6 @@
             font-size: 15px;
             border-radius: 8px;
             border: 1px solid #cbd5e1;
-            margin-right: 10px;
         }
 
         button {
@@ -72,10 +75,21 @@
         }
 
         .card-value {
-            font-size: 22px;
+            font-size: 18px;
             font-weight: bold;
             margin-top: 6px;
             color: #0f172a;
+        }
+
+        .chart-grid {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .chart-box {
+            width: 48%;
+            min-width: 420px;
         }
 
         canvas {
@@ -89,28 +103,73 @@
         }
     </style>
 </head>
+
 <body>
 
 <div class="container">
+
     <h1>Pulsecast Forecast Visualization</h1>
 
     <div class="controls">
-        <label for="metricSelect">Metric:</label>
 
+        <label for="trainingSelect">Training Dataset:</label>
+        <select id="trainingSelect">
+            <option value="OBSERVABILITY_TRAINING">Observability - 2 Months</option>
+            <option value="STOCK_TRAINING">Stock Market - 2 Months</option>
+            <option value="TRAFFIC_TRAINING">Smart City Traffic - 2 Months</option>
+        </select>
+
+        <label for="testSelect">Test Dataset:</label>
+        <select id="testSelect">
+            <option value="OBSERVABILITY_CURRENT">Observability - Current Day</option>
+            <option value="OBSERVABILITY_COMPLIANT">Observability - Compliant Day</option>
+            <option value="OBSERVABILITY_CHAOTIC">Observability - Chaotic Day</option>
+
+            <option value="STOCK_COMPLIANT">Stock - Compliant Day</option>
+            <option value="STOCK_CHAOTIC">Stock - Chaotic Day</option>
+            <option value="STOCK_MIXED">Stock - Mixed Day</option>
+            <option value="STOCK_LIKE_OBSERVABILITY">Stock Like Observability Day</option>
+
+            <option value="TRAFFIC_COMPLIANT">Traffic - Compliant Day</option>
+            <option value="TRAFFIC_CHAOTIC">Traffic - Chaotic Day</option>
+            <option value="TRAFFIC_MIXED">Traffic - Mixed Day</option>
+        </select>
+
+        <label for="metricSelect">Metric:</label>
         <select id="metricSelect">
-            <option value="traffic">Traffic</option>
-            <option value="latency">Latency</option>
-            <option value="errors">Errors</option>
-            <option value="saturation">Saturation</option>
+            <option value="TRAFFIC">Traffic</option>
+            <option value="LATENCY">Latency</option>
+            <option value="ERRORS">Errors</option>
+            <option value="SATURATION">Saturation</option>
+        </select>
+
+        <label for="viewSelect">View:</label>
+        <select id="viewSelect">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="twomonth">2 Months</option>
         </select>
 
         <button onclick="loadChart()">Load Forecast</button>
+
     </div>
 
     <div class="summary">
+
         <div class="card">
             <div class="card-title">Metric</div>
             <div class="card-value" id="metricName">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Training Dataset</div>
+            <div class="card-value" id="trainingName">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Test Dataset</div>
+            <div class="card-value" id="testName">-</div>
         </div>
 
         <div class="card">
@@ -127,131 +186,315 @@
             <div class="card-title">Points</div>
             <div class="card-value" id="pointCount">-</div>
         </div>
+
     </div>
 
-    <canvas id="forecastChart"></canvas>
+    <div class="chart-grid">
+
+        <div class="chart-box">
+            <canvas id="forecastChart"></canvas>
+        </div>
+
+        <div class="chart-box">
+            <canvas id="trainingChart"></canvas>
+        </div>
+
+    </div>
 
     <div class="note">
-        Blue line = actual values, orange line = forecast values, grey dashed lines = confidence range.
+        Actual vs Forecast is shown using the selected test dataset. Training chart shows the selected 2-month training file.
     </div>
+
 </div>
 
 <script>
-    let chartInstance = null;
+    let forecastChartInstance = null;
+    let trainingChartInstance = null;
 
     async function loadChart() {
-        const metric = document.getElementById("metricSelect").value;
 
-        const response = await fetch(`/forecast/chart/${metric}`);
+        const training =
+            document.getElementById("trainingSelect").value;
+
+        const test =
+            document.getElementById("testSelect").value;
+
+        const metric =
+            document.getElementById("metricSelect").value;
+
+        const view =
+            document.getElementById("viewSelect").value;
+
+        const url =
+            `/forecast/chart?training=${training}&test=${test}&metric=${metric}`;
+
+        const response =
+            await fetch(url);
 
         if (!response.ok) {
-            alert("Failed to load chart data. Check backend endpoint.");
+            alert("Failed to load chart data. Check backend console.");
             return;
         }
 
-        const data = await response.json();
+        const data =
+            await response.json();
 
-        const actual = data.actualValues;
-        const forecast = data.forecastValues;
-        const lower = data.lowerBounds;
-        const upper = data.upperBounds;
+        let actual =
+            data.actualValues || [];
 
-        const labels = actual.map((_, index) => index + 1);
+        let forecast =
+            data.forecastValues || [];
 
-        document.getElementById("metricName").innerText = data.metric;
-        document.getElementById("actualAvg").innerText = average(actual).toFixed(2);
-        document.getElementById("forecastAvg").innerText = average(forecast).toFixed(2);
-        document.getElementById("pointCount").innerText = actual.length;
+        let lower =
+            data.lowerBounds || [];
 
-        const ctx = document.getElementById("forecastChart").getContext("2d");
+        let upper =
+            data.upperBounds || [];
 
-        if (chartInstance !== null) {
-            chartInstance.destroy();
+        let trainingValues =
+            data.trainingValues || [];
+
+        let forecastLimit =
+            actual.length;
+
+        if (view === "daily") {
+            forecastLimit = 288;
+        } else if (view === "weekly") {
+            forecastLimit = 2016;
+        } else if (view === "monthly") {
+            forecastLimit = 8640;
         }
 
-        chartInstance = new Chart(ctx, {
-            type: "line",
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: "Actual",
-                        data: actual,
-                        borderColor: "#2563eb",
-                        backgroundColor: "rgba(37, 99, 235, 0.08)",
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        tension: 0.25
-                    },
-                    {
-                        label: "Forecast",
-                        data: forecast,
-                        borderColor: "#f97316",
-                        backgroundColor: "rgba(249, 115, 22, 0.08)",
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        tension: 0.25
-                    },
-                    {
-                        label: "Lower Bound",
-                        data: lower,
-                        borderColor: "#94a3b8",
-                        borderWidth: 1,
-                        borderDash: [6, 6],
-                        pointRadius: 0,
-                        tension: 0.25
-                    },
-                    {
-                        label: "Upper Bound",
-                        data: upper,
-                        borderColor: "#94a3b8",
-                        borderWidth: 1,
-                        borderDash: [6, 6],
-                        pointRadius: 0,
-                        tension: 0.25
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                interaction: {
-                    mode: "index",
-                    intersect: false
+        actual =
+            actual.slice(-forecastLimit);
+
+        forecast =
+            forecast.slice(-forecastLimit);
+
+        lower =
+            lower.slice(-forecastLimit);
+
+        upper =
+            upper.slice(-forecastLimit);
+
+        let trainingLimit =
+            trainingValues.length;
+
+        if (view === "daily") {
+            trainingLimit = 288;
+        } else if (view === "weekly") {
+            trainingLimit = 2016;
+        } else if (view === "monthly") {
+            trainingLimit = 8640;
+        }
+
+        trainingValues =
+            trainingValues.slice(-trainingLimit);
+
+        const forecastLabels =
+            actual.map((_, index) => index + 1);
+
+        const trainingLabels =
+            trainingValues.map((_, index) => index + 1);
+
+        document.getElementById("metricName").innerText =
+            data.metric;
+
+        document.getElementById("trainingName").innerText =
+            data.trainingDataset;
+
+        document.getElementById("testName").innerText =
+            data.testDataset;
+
+        document.getElementById("actualAvg").innerText =
+            average(actual).toFixed(2);
+
+        document.getElementById("forecastAvg").innerText =
+            average(forecast).toFixed(2);
+
+        document.getElementById("pointCount").innerText =
+            actual.length;
+
+        drawForecastChart(
+            forecastLabels,
+            actual,
+            forecast,
+            lower,
+            upper,
+            data.metric
+        );
+
+        drawTrainingChart(
+            trainingLabels,
+            trainingValues,
+            data.metric
+        );
+    }
+
+    function drawForecastChart(
+        labels,
+        actual,
+        forecast,
+        lower,
+        upper,
+        metric
+    ) {
+
+        const ctx =
+            document.getElementById("forecastChart").getContext("2d");
+
+        if (forecastChartInstance !== null) {
+            forecastChartInstance.destroy();
+        }
+
+        forecastChartInstance =
+            new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: "Actual",
+                            data: actual,
+                            borderColor: "#2563eb",
+                            backgroundColor: "rgba(37, 99, 235, 0.08)",
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.25
+                        },
+                        {
+                            label: "Forecast",
+                            data: forecast,
+                            borderColor: "#f97316",
+                            backgroundColor: "rgba(249, 115, 22, 0.08)",
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.25
+                        },
+                        {
+                            label: "Lower Bound",
+                            data: lower,
+                            borderColor: "#94a3b8",
+                            borderWidth: 1,
+                            borderDash: [6, 6],
+                            pointRadius: 0,
+                            tension: 0.25
+                        },
+                        {
+                            label: "Upper Bound",
+                            data: upper,
+                            borderColor: "#94a3b8",
+                            borderWidth: 1,
+                            borderDash: [6, 6],
+                            pointRadius: 0,
+                            tension: 0.25
+                        }
+                    ]
                 },
-                plugins: {
-                    legend: {
-                        position: "top"
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: "index",
+                        intersect: false
                     },
-                    tooltip: {
-                        callbacks: {
-                            title: function(context) {
-                                return "Interval " + context[0].label;
+                    plugins: {
+                        legend: {
+                            position: "top"
+                        },
+                        title: {
+                            display: true,
+                            text: metric + " Actual vs Forecast"
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: "5-minute interval"
+                            },
+                            ticks: {
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: metric
                             }
                         }
                     }
+                }
+            });
+    }
+
+    function drawTrainingChart(
+        labels,
+        trainingValues,
+        metric
+    ) {
+
+        const ctx =
+            document.getElementById("trainingChart").getContext("2d");
+
+        if (trainingChartInstance !== null) {
+            trainingChartInstance.destroy();
+        }
+
+        trainingChartInstance =
+            new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: "Training Data",
+                            data: trainingValues,
+                            borderColor: "#16a34a",
+                            backgroundColor: "rgba(22, 163, 74, 0.08)",
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.25
+                        }
+                    ]
                 },
-                scales: {
-                    x: {
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: "index",
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: "top"
+                        },
                         title: {
                             display: true,
-                            text: "5-minute interval"
-                        },
-                        ticks: {
-                            maxTicksLimit: 20
+                            text: metric + " Training Dataset"
                         }
                     },
-                    y: {
-                        title: {
-                            display: true,
-                            text: data.metric
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: "5-minute interval"
+                            },
+                            ticks: {
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: metric
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
     }
 
     function average(values) {
+
         if (!values || values.length === 0) {
             return 0;
         }

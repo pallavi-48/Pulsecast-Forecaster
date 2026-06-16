@@ -18,7 +18,7 @@ scheduling:
   enabled: true
 
 dataset:
-  path: classpath:dataset/observability_dataset.csv
+  path: classpath:dataset/2_month_metrics.csv
   replay-interval-ms: 5000   # one CSV row every 5 seconds
 server:
   port: 8081

@@ -15,7 +15,7 @@
         }
 
         .container {
-            max-width: 1300px;
+            max-width: 1350px;
             margin: auto;
             background: white;
             padding: 25px;
@@ -29,14 +29,14 @@
         }
 
         .controls {
-            margin-bottom: 20px;
             display: flex;
             flex-wrap: wrap;
             gap: 12px;
             align-items: center;
+            margin-bottom: 20px;
         }
 
-        select, button {
+        select, button, input {
             padding: 10px 14px;
             font-size: 15px;
             border-radius: 8px;
@@ -54,6 +54,14 @@
             background: #1d4ed8;
         }
 
+        button.secondary {
+            background: #475569;
+        }
+
+        button.secondary:hover {
+            background: #334155;
+        }
+
         .summary {
             display: flex;
             gap: 16px;
@@ -65,7 +73,7 @@
             background: #f8fafc;
             padding: 14px 18px;
             border-radius: 12px;
-            min-width: 180px;
+            min-width: 170px;
             border: 1px solid #e2e8f0;
         }
 
@@ -96,10 +104,31 @@
             margin-top: 20px;
         }
 
+        .window-controls {
+            margin: 20px 0;
+            padding: 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+        }
+
+        .window-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
         .note {
             margin-top: 16px;
             font-size: 14px;
             color: #64748b;
+        }
+
+        .warning {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #b45309;
         }
     </style>
 </head>
@@ -144,11 +173,11 @@
         </select>
 
         <label for="viewSelect">View:</label>
-        <select id="viewSelect">
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="twomonth">2 Months</option>
+        <select id="viewSelect" onchange="resetWindowAndRedraw()">
+            <option value="daily">Daily Window</option>
+            <option value="weekly">Weekly Window</option>
+            <option value="monthly">Monthly-wise Window</option>
+            <option value="twomonth">Full 2 Months</option>
         </select>
 
         <button onclick="loadChart()">Load Forecast</button>
@@ -183,8 +212,52 @@
         </div>
 
         <div class="card">
-            <div class="card-title">Points</div>
-            <div class="card-value" id="pointCount">-</div>
+            <div class="card-title">Forecast Points</div>
+            <div class="card-value" id="forecastPointCount">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Training Window</div>
+            <div class="card-value" id="trainingWindowLabel">-</div>
+        </div>
+
+    </div>
+
+    <div class="window-controls">
+
+        <div class="window-row">
+
+            <button class="secondary" onclick="previousWindow()">Previous</button>
+
+            <button class="secondary" onclick="nextWindow()">Next</button>
+
+            <label for="windowSlider">Scroll Training Window:</label>
+            <input
+                    id="windowSlider"
+                    type="range"
+                    min="0"
+                    max="0"
+                    value="0"
+                    style="width: 360px;"
+                    oninput="onSliderChanged()"
+            >
+
+            <label for="windowNumber">Window:</label>
+            <input
+                    id="windowNumber"
+                    type="number"
+                    min="1"
+                    value="1"
+                    style="width: 90px;"
+                    onchange="onWindowNumberChanged()"
+            >
+
+            <span id="windowCountText">of 1</span>
+
+        </div>
+
+        <div class="warning">
+            Daily/weekly/monthly view now scrolls across the 2-month training dataset instead of showing only one fixed slice.
         </div>
 
     </div>
@@ -202,7 +275,7 @@
     </div>
 
     <div class="note">
-        Actual vs Forecast is shown using the selected test dataset. Training chart shows the selected 2-month training file.
+        Left: selected test day actual vs forecast. Right: scrollable training-data window for checking repeated daily/weekly behavior.
     </div>
 
 </div>
@@ -210,6 +283,14 @@
 <script>
     let forecastChartInstance = null;
     let trainingChartInstance = null;
+
+    let latestData = null;
+
+    let currentWindowIndex = 0;
+
+    const POINTS_PER_DAY = 288;
+    const POINTS_PER_WEEK = 2016;
+    const POINTS_PER_MONTH = 8640;
 
     async function loadChart() {
 
@@ -222,9 +303,6 @@
         const metric =
             document.getElementById("metricSelect").value;
 
-        const view =
-            document.getElementById("viewSelect").value;
-
         const url =
             `/forecast/chart?training=${training}&test=${test}&metric=${metric}`;
 
@@ -232,79 +310,97 @@
             await fetch(url);
 
         if (!response.ok) {
-            alert("Failed to load chart data. Check backend console.");
+            alert("Failed to load chart data. Check Spring Boot console.");
             return;
         }
 
-        const data =
+        latestData =
             await response.json();
 
-        let actual =
-            data.actualValues || [];
+        currentWindowIndex = 0;
 
-        let forecast =
-            data.forecastValues || [];
+        updateAllCharts();
+    }
 
-        let lower =
-            data.lowerBounds || [];
+    function updateAllCharts() {
 
-        let upper =
-            data.upperBounds || [];
-
-        let trainingValues =
-            data.trainingValues || [];
-
-        let forecastLimit =
-            actual.length;
-
-        if (view === "daily") {
-            forecastLimit = 288;
-        } else if (view === "weekly") {
-            forecastLimit = 2016;
-        } else if (view === "monthly") {
-            forecastLimit = 8640;
+        if (!latestData) {
+            return;
         }
 
-        actual =
-            actual.slice(-forecastLimit);
+        const actual =
+            latestData.actualValues || [];
 
-        forecast =
-            forecast.slice(-forecastLimit);
+        const forecast =
+            latestData.forecastValues || [];
 
-        lower =
-            lower.slice(-forecastLimit);
+        const lower =
+            latestData.lowerBounds || [];
 
-        upper =
-            upper.slice(-forecastLimit);
+        const upper =
+            latestData.upperBounds || [];
 
-        let trainingLimit =
-            trainingValues.length;
+        const trainingValues =
+            latestData.trainingValues || [];
 
-        if (view === "daily") {
-            trainingLimit = 288;
-        } else if (view === "weekly") {
-            trainingLimit = 2016;
-        } else if (view === "monthly") {
-            trainingLimit = 8640;
-        }
+        const forecastLength =
+            Math.min(
+                actual.length,
+                forecast.length,
+                lower.length,
+                upper.length
+            );
 
-        trainingValues =
-            trainingValues.slice(-trainingLimit);
+        const actualSlice =
+            actual.slice(0, forecastLength);
 
-        const forecastLabels =
-            actual.map((_, index) => index + 1);
+        const forecastSlice =
+            forecast.slice(0, forecastLength);
 
-        const trainingLabels =
-            trainingValues.map((_, index) => index + 1);
+        const lowerSlice =
+            lower.slice(0, forecastLength);
+
+        const upperSlice =
+            upper.slice(0, forecastLength);
+
+        updateSummary(
+            actualSlice,
+            forecastSlice,
+            trainingValues
+        );
+
+        drawForecastChart(
+            actualSlice,
+            forecastSlice,
+            lowerSlice,
+            upperSlice,
+            latestData.metric
+        );
+
+        updateWindowControls(
+            trainingValues.length
+        );
+
+        drawTrainingWindowChart(
+            trainingValues,
+            latestData.metric
+        );
+    }
+
+    function updateSummary(
+        actual,
+        forecast,
+        trainingValues
+    ) {
 
         document.getElementById("metricName").innerText =
-            data.metric;
+            latestData.metric;
 
         document.getElementById("trainingName").innerText =
-            data.trainingDataset;
+            latestData.trainingDataset;
 
         document.getElementById("testName").innerText =
-            data.testDataset;
+            latestData.testDataset;
 
         document.getElementById("actualAvg").innerText =
             average(actual).toFixed(2);
@@ -312,33 +408,217 @@
         document.getElementById("forecastAvg").innerText =
             average(forecast).toFixed(2);
 
-        document.getElementById("pointCount").innerText =
+        document.getElementById("forecastPointCount").innerText =
             actual.length;
 
-        drawForecastChart(
-            forecastLabels,
-            actual,
-            forecast,
-            lower,
-            upper,
-            data.metric
-        );
+        const windowInfo =
+            getWindowInfo(trainingValues.length);
 
-        drawTrainingChart(
-            trainingLabels,
-            trainingValues,
-            data.metric
+        document.getElementById("trainingWindowLabel").innerText =
+            windowInfo.label;
+    }
+
+    function getWindowSize() {
+
+        const view =
+            document.getElementById("viewSelect").value;
+
+        if (view === "daily") {
+            return POINTS_PER_DAY;
+        }
+
+        if (view === "weekly") {
+            return POINTS_PER_WEEK;
+        }
+
+        if (view === "monthly") {
+            return POINTS_PER_MONTH;
+        }
+
+        return latestData && latestData.trainingValues
+            ? latestData.trainingValues.length
+            : POINTS_PER_DAY;
+    }
+
+    function getTotalWindows(totalPoints) {
+
+        const windowSize =
+            getWindowSize();
+
+        if (windowSize <= 0 || totalPoints <= 0) {
+            return 1;
+        }
+
+        return Math.max(
+            1,
+            Math.ceil(totalPoints / windowSize)
         );
     }
 
+    function getWindowInfo(totalPoints) {
+
+        const view =
+            document.getElementById("viewSelect").value;
+
+        const windowSize =
+            getWindowSize();
+
+        const totalWindows =
+            getTotalWindows(totalPoints);
+
+        if (currentWindowIndex >= totalWindows) {
+            currentWindowIndex =
+                totalWindows - 1;
+        }
+
+        if (currentWindowIndex < 0) {
+            currentWindowIndex = 0;
+        }
+
+        const start =
+            currentWindowIndex * windowSize;
+
+        const end =
+            Math.min(
+                start + windowSize,
+                totalPoints
+            );
+
+        let labelPrefix = "";
+
+        if (view === "daily") {
+            labelPrefix = "Day";
+        } else if (view === "weekly") {
+            labelPrefix = "Week";
+        } else if (view === "monthly") {
+            labelPrefix = "Month";
+        } else {
+            labelPrefix = "Full";
+        }
+
+        return {
+            start: start,
+            end: end,
+            totalWindows: totalWindows,
+            label: `${labelPrefix} ${currentWindowIndex + 1} / ${totalWindows}`
+        };
+    }
+
+    function updateWindowControls(totalPoints) {
+
+        const windowInfo =
+            getWindowInfo(totalPoints);
+
+        const slider =
+            document.getElementById("windowSlider");
+
+        const number =
+            document.getElementById("windowNumber");
+
+        slider.min = 0;
+        slider.max = windowInfo.totalWindows - 1;
+        slider.value = currentWindowIndex;
+
+        number.min = 1;
+        number.max = windowInfo.totalWindows;
+        number.value = currentWindowIndex + 1;
+
+        document.getElementById("windowCountText").innerText =
+            `of ${windowInfo.totalWindows}`;
+
+        document.getElementById("trainingWindowLabel").innerText =
+            windowInfo.label;
+    }
+
+    function previousWindow() {
+
+        if (!latestData) {
+            return;
+        }
+
+        currentWindowIndex =
+            Math.max(0, currentWindowIndex - 1);
+
+        updateAllCharts();
+    }
+
+    function nextWindow() {
+
+        if (!latestData) {
+            return;
+        }
+
+        const totalWindows =
+            getTotalWindows(latestData.trainingValues.length);
+
+        currentWindowIndex =
+            Math.min(
+                totalWindows - 1,
+                currentWindowIndex + 1
+            );
+
+        updateAllCharts();
+    }
+
+    function onSliderChanged() {
+
+        if (!latestData) {
+            return;
+        }
+
+        currentWindowIndex =
+            Number(document.getElementById("windowSlider").value);
+
+        updateAllCharts();
+    }
+
+    function onWindowNumberChanged() {
+
+        if (!latestData) {
+            return;
+        }
+
+        const totalWindows =
+            getTotalWindows(latestData.trainingValues.length);
+
+        let value =
+            Number(document.getElementById("windowNumber").value);
+
+        if (Number.isNaN(value)) {
+            value = 1;
+        }
+
+        value =
+            Math.max(
+                1,
+                Math.min(value, totalWindows)
+            );
+
+        currentWindowIndex =
+            value - 1;
+
+        updateAllCharts();
+    }
+
+    function resetWindowAndRedraw() {
+
+        currentWindowIndex = 0;
+
+        if (latestData) {
+            updateAllCharts();
+        }
+    }
+
     function drawForecastChart(
-        labels,
         actual,
         forecast,
         lower,
         upper,
         metric
     ) {
+
+        const labels =
+            actual.map((_, index) => index + 1);
 
         const ctx =
             document.getElementById("forecastChart").getContext("2d");
@@ -410,7 +690,7 @@
                         x: {
                             title: {
                                 display: true,
-                                text: "5-minute interval"
+                                text: "Test day 5-minute interval"
                             },
                             ticks: {
                                 maxTicksLimit: 20
@@ -427,11 +707,24 @@
             });
     }
 
-    function drawTrainingChart(
-        labels,
+    function drawTrainingWindowChart(
         trainingValues,
         metric
     ) {
+
+        const windowInfo =
+            getWindowInfo(trainingValues.length);
+
+        const visibleTraining =
+            trainingValues.slice(
+                windowInfo.start,
+                windowInfo.end
+            );
+
+        const labels =
+            visibleTraining.map(
+                (_, index) => windowInfo.start + index + 1
+            );
 
         const ctx =
             document.getElementById("trainingChart").getContext("2d");
@@ -448,7 +741,7 @@
                     datasets: [
                         {
                             label: "Training Data",
-                            data: trainingValues,
+                            data: visibleTraining,
                             borderColor: "#16a34a",
                             backgroundColor: "rgba(22, 163, 74, 0.08)",
                             borderWidth: 2,
@@ -469,14 +762,14 @@
                         },
                         title: {
                             display: true,
-                            text: metric + " Training Dataset"
+                            text: metric + " Training Dataset - " + windowInfo.label
                         }
                     },
                     scales: {
                         x: {
                             title: {
                                 display: true,
-                                text: "5-minute interval"
+                                text: "Training 5-minute interval"
                             },
                             ticks: {
                                 maxTicksLimit: 20

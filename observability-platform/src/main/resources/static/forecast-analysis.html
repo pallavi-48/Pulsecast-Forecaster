@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pulsecast Time-Series Analysis</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f7fb;
+            margin: 0;
+            padding: 30px;
+        }
+
+        .container {
+            max-width: 1350px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            margin-top: 0;
+            color: #1f2937;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        select, input, button {
+            padding: 10px 14px;
+            font-size: 15px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+        }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button.secondary {
+            background: #475569;
+        }
+
+        button.secondary:hover {
+            background: #334155;
+        }
+
+        .summary {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 14px 18px;
+            min-width: 180px;
+        }
+
+        .card-title {
+            color: #64748b;
+            font-size: 13px;
+        }
+
+        .card-value {
+            color: #0f172a;
+            font-size: 18px;
+            font-weight: bold;
+            margin-top: 6px;
+        }
+
+        .window-controls {
+            margin: 20px 0;
+            padding: 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+        }
+
+        .window-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
+        canvas {
+            margin-top: 20px;
+        }
+
+        .note {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #64748b;
+        }
+
+        .table-section {
+            margin-top: 24px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            font-size: 14px;
+        }
+
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 10px;
+            text-align: left;
+        }
+
+        th {
+            background: #f1f5f9;
+            color: #334155;
+        }
+
+        tr:nth-child(even) {
+            background: #f8fafc;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Pulsecast Time-Series Analysis</h1>
+
+    <div class="controls">
+
+        <label>Training Dataset:</label>
+        <select id="domainSelect">
+            <option value="observability">Observability</option>
+            <option value="stock">Stock</option>
+            <option value="traffic">Traffic</option>
+            <option value="solar">Solar</option>
+        </select>
+
+        <label>Test Type:</label>
+        <select id="testTypeSelect">
+            <option value="compliant">Compliant</option>
+            <option value="chaotic">Chaotic</option>
+            <option value="mixed">Mixed</option>
+        </select>
+
+        <label>Metric:</label>
+        <select id="metricSelect">
+            <option value="requests_per_second">Requests Per Second</option>
+            <option value="response_time_ms">Response Time MS</option>
+            <option value="error_rate_percent">Error Rate Percent</option>
+            <option value="cpu_usage_percent">CPU Usage Percent</option>
+        </select>
+
+        <label>Graph Type:</label>
+        <select id="graphTypeSelect" onchange="handleGraphTypeChange()">
+            <option value="training-trend">Training Trend</option>
+            <option value="forecast-comparison">Actual vs Forecast</option>
+            <option value="residuals">Residuals</option>
+            <option value="fft-spectrum">FFT Spectrum</option>
+            <option value="seasonality-strength">Seasonality Strength</option>
+            <option value="dataset-comparison">Dataset Comparison</option>
+        </select>
+
+        <label>MA Window:</label>
+        <input id="windowInput" type="number" value="288" min="2">
+
+        <label>FFT Min Hours:</label>
+        <input id="fftMinHours" type="number" value="1" min="0.1" step="0.5" style="width:90px;">
+
+        <label>FFT Max Hours:</label>
+        <input id="fftMaxHours" type="number" value="200" min="1" step="1" style="width:100px;">
+
+        <button onclick="loadGraph()">Load Graph</button>
+
+    </div>
+
+    <div id="trainingWindowControls" class="window-controls">
+
+        <div class="window-row">
+
+            <label>Training View:</label>
+            <select id="trainingWindowSelect" onchange="resetAnalysisWindow()">
+                <option value="daily">Day-wise</option>
+                <option value="weekly">Week-wise</option>
+                <option value="monthly">Month-wise</option>
+                <option value="full">Full Training Data</option>
+            </select>
+
+            <button class="secondary" onclick="previousAnalysisWindow()">Previous</button>
+            <button class="secondary" onclick="nextAnalysisWindow()">Next</button>
+
+            <label>Scroll:</label>
+            <input
+                    id="analysisWindowSlider"
+                    type="range"
+                    min="0"
+                    max="0"
+                    value="0"
+                    style="width: 360px;"
+                    oninput="onAnalysisSliderChanged()"
+            >
+
+            <label>Window:</label>
+            <input
+                    id="analysisWindowNumber"
+                    type="number"
+                    min="1"
+                    value="1"
+                    style="width: 90px;"
+                    onchange="onAnalysisWindowNumberChanged()"
+            >
+
+            <span id="analysisWindowLabel">Window 1 / 1</span>
+
+        </div>
+
+        <div class="note">
+            Use this to move through Day 1, Day 2, Week 1, Week 2, Month 1, etc. This helps check whether seasonality repeats consistently.
+        </div>
+
+    </div>
+
+    <div class="summary">
+
+        <div class="card">
+            <div class="card-title">Graph</div>
+            <div class="card-value" id="graphName">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Points</div>
+            <div class="card-value" id="pointCount">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Average</div>
+            <div class="card-value" id="avgValue">-</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Max</div>
+            <div class="card-value" id="maxValue">-</div>
+        </div>
+
+    </div>
+
+    <canvas id="analysisChart"></canvas>
+
+    <div class="note" id="noteText">
+        Select a dataset, test type, metric, and graph type.
+    </div>
+
+    <div id="dominantPeriodsSection" class="table-section hidden">
+        <h3>Dominant Periods</h3>
+
+        <table id="dominantPeriodsTable">
+            <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Period Samples</th>
+                <th>Period Hours</th>
+                <th>Power %</th>
+                <th>Meaning</th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+</div>
+
+<script>
+    let chartInstance = null;
+
+    let fullGraphData = [];
+    let currentAnalysisWindow = 0;
+
+    const POINTS_PER_DAY = 288;
+    const POINTS_PER_WEEK = 2016;
+    const POINTS_PER_MONTH = 8640;
+
+    async function loadGraph() {
+
+        const domain =
+            document.getElementById("domainSelect").value;
+
+        const testType =
+            document.getElementById("testTypeSelect").value;
+
+        const metric =
+            document.getElementById("metricSelect").value;
+
+        const graphType =
+            document.getElementById("graphTypeSelect").value;
+
+        const windowSize =
+            document.getElementById("windowInput").value;
+
+        let url = "";
+
+        hideDominantPeriods();
+
+        if (graphType === "training-trend") {
+            url =
+                `/api/analysis/training-trend?domain=${domain}&metric=${metric}&window=${windowSize}`;
+        }
+
+        else if (graphType === "forecast-comparison") {
+            url =
+                `/api/analysis/forecast-comparison?domain=${domain}&testType=${testType}&metric=${metric}`;
+        }
+
+        else if (graphType === "residuals") {
+            url =
+                `/api/analysis/residuals?domain=${domain}&testType=${testType}&metric=${metric}`;
+        }
+
+        else if (graphType === "fft-spectrum") {
+            url =
+                `/api/fft/spectrum?domain=${domain}&metric=${metric}`;
+        }
+
+        else if (graphType === "seasonality-strength") {
+            url =
+                `/api/fft/seasonality-strength?domain=${domain}&metric=${metric}`;
+        }
+
+        else if (graphType === "dataset-comparison") {
+            url =
+                `/api/fft/compare?metric=${metric}`;
+        }
+
+        const response =
+            await fetch(url);
+
+        if (!response.ok) {
+            alert("Failed to load data. Check Spring Boot console.");
+            return;
+        }
+
+        const data =
+            await response.json();
+
+        if (graphType === "training-trend") {
+            fullGraphData = data;
+            currentAnalysisWindow = 0;
+
+            drawTrainingTrend(
+                getWindowedGraphData(),
+                metric
+            );
+        }
+
+        else if (graphType === "forecast-comparison") {
+            fullGraphData = [];
+            drawForecastComparison(data, metric);
+        }
+
+        else if (graphType === "residuals") {
+            fullGraphData = [];
+            drawResiduals(data, metric);
+        }
+
+        else if (graphType === "fft-spectrum") {
+            fullGraphData = [];
+            drawFftSpectrum(data, metric);
+        }
+
+        else if (graphType === "seasonality-strength") {
+            fullGraphData = [];
+            drawSeasonalityStrength(data);
+        }
+
+        else if (graphType === "dataset-comparison") {
+            fullGraphData = [];
+            drawDatasetComparison(data);
+        }
+
+        handleGraphTypeChange();
+    }
+
+    function handleGraphTypeChange() {
+        const graphType =
+            document.getElementById("graphTypeSelect").value;
+
+        const controls =
+            document.getElementById("trainingWindowControls");
+
+        if (graphType === "training-trend") {
+            controls.classList.remove("hidden");
+        } else {
+            controls.classList.add("hidden");
+        }
+    }
+
+    function getAnalysisWindowSize() {
+        const selected =
+            document.getElementById("trainingWindowSelect").value;
+
+        if (selected === "daily") {
+            return POINTS_PER_DAY;
+        }
+
+        if (selected === "weekly") {
+            return POINTS_PER_WEEK;
+        }
+
+        if (selected === "monthly") {
+            return POINTS_PER_MONTH;
+        }
+
+        return fullGraphData.length;
+    }
+
+    function getWindowedGraphData() {
+        const size =
+            getAnalysisWindowSize();
+
+        const totalWindows =
+            Math.max(
+                1,
+                Math.ceil(fullGraphData.length / size)
+            );
+
+        if (currentAnalysisWindow < 0) {
+            currentAnalysisWindow = 0;
+        }
+
+        if (currentAnalysisWindow >= totalWindows) {
+            currentAnalysisWindow = totalWindows - 1;
+        }
+
+        const start =
+            currentAnalysisWindow * size;
+
+        const end =
+            Math.min(
+                start + size,
+                fullGraphData.length
+            );
+
+        updateAnalysisWindowControls(totalWindows);
+
+        return fullGraphData.slice(start, end);
+    }
+
+    function updateAnalysisWindowControls(totalWindows) {
+        const slider =
+            document.getElementById("analysisWindowSlider");
+
+        const number =
+            document.getElementById("analysisWindowNumber");
+
+        slider.min = 0;
+        slider.max = totalWindows - 1;
+        slider.value = currentAnalysisWindow;
+
+        number.min = 1;
+        number.max = totalWindows;
+        number.value = currentAnalysisWindow + 1;
+
+        const selected =
+            document.getElementById("trainingWindowSelect").value;
+
+        let label = "Window";
+
+        if (selected === "daily") {
+            label = "Day";
+        } else if (selected === "weekly") {
+            label = "Week";
+        } else if (selected === "monthly") {
+            label = "Month";
+        } else if (selected === "full") {
+            label = "Full";
+        }
+
+        document.getElementById("analysisWindowLabel").innerText =
+            `${label} ${currentAnalysisWindow + 1} / ${totalWindows}`;
+    }
+
+    function previousAnalysisWindow() {
+        if (fullGraphData.length === 0) {
+            return;
+        }
+
+        currentAnalysisWindow--;
+
+        drawTrainingTrend(
+            getWindowedGraphData(),
+            document.getElementById("metricSelect").value
+        );
+    }
+
+    function nextAnalysisWindow() {
+        if (fullGraphData.length === 0) {
+            return;
+        }
+
+        currentAnalysisWindow++;
+
+        drawTrainingTrend(
+            getWindowedGraphData(),
+            document.getElementById("metricSelect").value
+        );
+    }
+
+    function resetAnalysisWindow() {
+        currentAnalysisWindow = 0;
+
+        if (fullGraphData.length > 0) {
+            drawTrainingTrend(
+                getWindowedGraphData(),
+                document.getElementById("metricSelect").value
+            );
+        }
+    }
+
+    function onAnalysisSliderChanged() {
+        if (fullGraphData.length === 0) {
+            return;
+        }
+
+        currentAnalysisWindow =
+            Number(document.getElementById("analysisWindowSlider").value);
+
+        drawTrainingTrend(
+            getWindowedGraphData(),
+            document.getElementById("metricSelect").value
+        );
+    }
+
+    function onAnalysisWindowNumberChanged() {
+        if (fullGraphData.length === 0) {
+            return;
+        }
+
+        let value =
+            Number(document.getElementById("analysisWindowNumber").value);
+
+        if (Number.isNaN(value)) {
+            value = 1;
+        }
+
+        currentAnalysisWindow =
+            value - 1;
+
+        drawTrainingTrend(
+            getWindowedGraphData(),
+            document.getElementById("metricSelect").value
+        );
+    }
+
+    function drawTrainingTrend(data, metric) {
+
+        const labels =
+            data.map((_, i) => i + 1);
+
+        const actual =
+            data.map(p => p.actual);
+
+        const trend =
+            data.map(p => p.trend);
+
+        updateSummary(
+            "Training Trend",
+            actual
+        );
+
+        drawLineChart(
+            labels,
+            [
+                {
+                    label: "Raw Training Data",
+                    data: actual,
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    tension: 0.15
+                },
+                {
+                    label: "Moving Average Trend",
+                    data: trend,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.25
+                }
+            ],
+            "Time index",
+            metric,
+            "Training Data with Moving Average Trend"
+        );
+
+        document.getElementById("noteText").innerText =
+            "This graph shows the raw training series and smoothed trend. Use day/week/month navigation to check if the pattern repeats consistently.";
+    }
+
+    function drawForecastComparison(data, metric) {
+
+        const labels =
+            data.map((_, i) => i + 1);
+
+        const actual =
+            data.map(p => p.actual);
+
+        const forecast =
+            data.map(p => p.forecast);
+
+        updateSummary(
+            "Actual vs Forecast",
+            actual
+        );
+
+        drawLineChart(
+            labels,
+            [
+                {
+                    label: "Actual Test Data",
+                    data: actual,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.25
+                },
+                {
+                    label: "Forecast",
+                    data: forecast,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.25
+                }
+            ],
+            "Test time index",
+            metric,
+            "Actual vs Forecast"
+        );
+
+        document.getElementById("noteText").innerText =
+            "Use this to detect missed peaks, delayed peaks, amplitude mismatch, overprediction, and underprediction.";
+    }
+
+    function drawResiduals(data, metric) {
+
+        const labels =
+            data.map((_, i) => i + 1);
+
+        const residual =
+            data.map(p => p.residual);
+
+        const zero =
+            data.map(() => 0);
+
+        updateSummary(
+            "Residuals",
+            residual
+        );
+
+        drawLineChart(
+            labels,
+            [
+                {
+                    label: "Residual = Actual - Forecast",
+                    data: residual,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.25
+                },
+                {
+                    label: "Zero Reference",
+                    data: zero,
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    borderDash: [6, 6]
+                }
+            ],
+            "Test time index",
+            metric,
+            "Forecast Residuals"
+        );
+
+        document.getElementById("noteText").innerText =
+            "Residuals show what the model failed to explain. Repeating residual patterns mean missed structure; isolated large spikes suggest anomalies.";
+    }
+
+    function drawFftSpectrum(data, metric) {
+
+        const minHours =
+            Number(document.getElementById("fftMinHours").value) || 1;
+
+        const maxHours =
+            Number(document.getElementById("fftMaxHours").value) || 200;
+
+        const filtered =
+            data
+                .filter(p =>
+                    p.periodHours >= minHours &&
+                    p.periodHours <= maxHours
+                )
+                .sort((a, b) => a.periodHours - b.periodHours);
+
+        const fftPoints =
+            filtered.map(p => {
+                return {
+                    x: p.periodHours,
+                    y: Math.log10(p.power + 1)
+                };
+            });
+
+        const logPower =
+            fftPoints.map(p => p.y);
+
+        updateSummary(
+            "FFT Spectrum",
+            logPower
+        );
+
+        drawFftLineChart(
+            fftPoints,
+            minHours,
+            maxHours,
+            "FFT Spectrum: Period vs Power"
+        );
+
+        showDominantPeriods(
+            data,
+            minHours,
+            maxHours
+        );
+
+        document.getElementById("noteText").innerText =
+            "FFT converts the signal from time domain to period/frequency domain. X-axis is period in hours. Peaks near 24h show daily seasonality. Peaks near 168h show weekly seasonality.";
+    }
+
+    function drawSeasonalityStrength(data) {
+
+        const labels = [
+            "Daily",
+            "Weekly",
+            "Harmonics",
+            "Non-periodic"
+        ];
+
+        const values = [
+            data.dailyStrengthPercent,
+            data.weeklyStrengthPercent,
+            data.harmonicStrengthPercent,
+            data.nonPeriodicPowerPercent
+        ];
+
+        updateSummary(
+            "Seasonality Strength",
+            values
+        );
+
+        drawBarChart(
+            labels,
+            values,
+            "Power Percentage",
+            `${data.domain} - ${data.metric} Seasonality Strength`
+        );
+
+        showDominantPeriodsFromStrength(data);
+
+        document.getElementById("noteText").innerText =
+            "This summarizes how much spectral power belongs to daily, weekly, harmonic, and non-periodic behavior.";
+    }
+
+    function drawDatasetComparison(data) {
+
+        const labels =
+            data.map(item => item.domain);
+
+        const values =
+            data.map(item => item.seasonalVarianceExplainedPercent);
+
+        updateSummary(
+            "Dataset Comparison",
+            values
+        );
+
+        drawBarChart(
+            labels,
+            values,
+            "Seasonal Variance Explained (%)",
+            "FFT-based Dataset Comparison"
+        );
+
+        hideDominantPeriods();
+
+        document.getElementById("noteText").innerText =
+            data.map(item => `${item.domain}: ${item.interpretation}`).join(" | ");
+    }
+
+    function drawLineChart(
+        labels,
+        datasets,
+        xLabel,
+        yLabel,
+        title
+    ) {
+
+        const ctx =
+            document.getElementById("analysisChart").getContext("2d");
+
+        if (chartInstance !== null) {
+            chartInstance.destroy();
+        }
+
+        chartInstance =
+            new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: "index",
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: "top"
+                        },
+                        title: {
+                            display: true,
+                            text: title
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: xLabel
+                            },
+                            ticks: {
+                                maxTicksLimit: 24
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: yLabel
+                            }
+                        }
+                    }
+                }
+            });
+    }
+
+    function drawFftLineChart(
+        fftPoints,
+        minHours,
+        maxHours,
+        title
+    ) {
+        const ctx =
+            document.getElementById("analysisChart").getContext("2d");
+
+        if (chartInstance !== null) {
+            chartInstance.destroy();
+        }
+
+        chartInstance =
+            new Chart(ctx, {
+                type: "line",
+                data: {
+                    datasets: [
+                        {
+                            label: "log10(Power)",
+                            data: fftPoints,
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.2
+                        },
+                        {
+                            label: "Daily Reference: 24h",
+                            data: [
+                                { x: 24, y: 0 },
+                                { x: 24, y: getMaxY(fftPoints) }
+                            ],
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            borderDash: [6, 6]
+                        },
+                        {
+                            label: "Weekly Reference: 168h",
+                            data: [
+                                { x: 168, y: 0 },
+                                { x: 168, y: getMaxY(fftPoints) }
+                            ],
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            borderDash: [4, 4]
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    parsing: false,
+                    interaction: {
+                        mode: "nearest",
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: "top"
+                        },
+                        title: {
+                            display: true,
+                            text: title
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: "linear",
+                            min: minHours,
+                            max: maxHours,
+                            title: {
+                                display: true,
+                                text: "Period (hours)"
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value + "h";
+                                }
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: "log10(Power)"
+                            }
+                        }
+                    }
+                }
+            });
+    }
+
+    function drawBarChart(
+        labels,
+        values,
+        yLabel,
+        title
+    ) {
+        const ctx =
+            document.getElementById("analysisChart").getContext("2d");
+
+        if (chartInstance !== null) {
+            chartInstance.destroy();
+        }
+
+        chartInstance =
+            new Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: yLabel,
+                            data: values
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: "top"
+                        },
+                        title: {
+                            display: true,
+                            text: title
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: yLabel
+                            }
+                        }
+                    }
+                }
+            });
+    }
+
+    function showDominantPeriods(
+        data,
+        minHours = 1,
+        maxHours = 200
+    ) {
+
+        const section =
+            document.getElementById("dominantPeriodsSection");
+
+        const tbody =
+            document.querySelector("#dominantPeriodsTable tbody");
+
+        section.classList.remove("hidden");
+        tbody.innerHTML = "";
+
+        const top =
+            data
+                .filter(p =>
+                    p.periodHours >= minHours &&
+                    p.periodHours <= maxHours
+                )
+                .sort((a, b) => b.power - a.power)
+                .slice(0, 10);
+
+        top.forEach((p, index) => {
+            addDominantPeriodRow(
+                tbody,
+                index + 1,
+                p.periodSamples,
+                p.periodHours,
+                p.percentageOfTotalPower
+            );
+        });
+    }
+
+    function showDominantPeriodsFromStrength(data) {
+
+        const section =
+            document.getElementById("dominantPeriodsSection");
+
+        const tbody =
+            document.querySelector("#dominantPeriodsTable tbody");
+
+        section.classList.remove("hidden");
+        tbody.innerHTML = "";
+
+        if (!data.dominantPeriods) {
+            return;
+        }
+
+        data.dominantPeriods.forEach((p, index) => {
+            addDominantPeriodRow(
+                tbody,
+                index + 1,
+                p.periodSamples,
+                p.periodHours,
+                p.percentageOfTotalPower
+            );
+        });
+    }
+
+    function addDominantPeriodRow(
+        tbody,
+        rank,
+        periodSamples,
+        periodHours,
+        percentage
+    ) {
+
+        let meaning =
+            "Other periodic component";
+
+        if (Math.abs(periodHours - 24) <= 2) {
+            meaning =
+                "Daily seasonality";
+        }
+
+        else if (Math.abs(periodHours - 12) <= 1.5) {
+            meaning =
+                "12-hour harmonic";
+        }
+
+        else if (Math.abs(periodHours - 8) <= 1) {
+            meaning =
+                "8-hour harmonic";
+        }
+
+        else if (Math.abs(periodHours - 6) <= 1) {
+            meaning =
+                "6-hour harmonic";
+        }
+
+        else if (Math.abs(periodHours - 168) <= 10) {
+            meaning =
+                "Weekly seasonality";
+        }
+
+        const row =
+            document.createElement("tr");
+
+        row.innerHTML =
+            `
+            <td>${rank}</td>
+            <td>${periodSamples.toFixed(2)}</td>
+            <td>${periodHours.toFixed(2)}</td>
+            <td>${percentage.toFixed(3)}%</td>
+            <td>${meaning}</td>
+            `;
+
+        tbody.appendChild(row);
+    }
+
+    function getMaxY(points) {
+        if (!points || points.length === 0) {
+            return 1;
+        }
+
+        let maxVal = 0;
+
+        for (const point of points) {
+            maxVal =
+                Math.max(
+                    maxVal,
+                    point.y
+                );
+        }
+
+        return maxVal;
+    }
+
+    function hideDominantPeriods() {
+        document.getElementById("dominantPeriodsSection")
+            .classList.add("hidden");
+    }
+
+    function updateSummary(
+        graphName,
+        values
+    ) {
+        document.getElementById("graphName").innerText =
+            graphName;
+
+        document.getElementById("pointCount").innerText =
+            values.length;
+
+        document.getElementById("avgValue").innerText =
+            average(values).toFixed(2);
+
+        document.getElementById("maxValue").innerText =
+            max(values).toFixed(2);
+    }
+
+    function average(values) {
+
+        if (!values || values.length === 0) {
+            return 0;
+        }
+
+        let sum = 0;
+
+        for (const value of values) {
+            sum += value;
+        }
+
+        return sum / values.length;
+    }
+
+    function max(values) {
+
+        if (!values || values.length === 0) {
+            return 0;
+        }
+
+        let result =
+            -Infinity;
+
+        for (const value of values) {
+            result =
+                Math.max(result, value);
+        }
+
+        return result;
+    }
+
+    window.onload = function () {
+        handleGraphTypeChange();
+    };
+</script>
+
+</body>
+</html>
